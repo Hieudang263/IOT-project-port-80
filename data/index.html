@@ -1,769 +1,164 @@
-﻿<!DOCTYPE html>
+﻿<!DOCTYPE HTML>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ESP32 Control Panel</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-      padding: 20px;
-    }
-    .container { max-width: 1200px; margin: 0 auto; }
-    .header {
-      background: white;
-      border-radius: 16px;
-      padding: 24px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-      text-align: center;
-    }
-    .header h1 { color: #667eea; font-size: 32px; margin-bottom: 8px; }
-    .header p { color: #666; font-size: 14px; }
-    
-    /* Connection Status */
-    .status-bar {
-      background: white;
-      border-radius: 10px;
-      padding: 12px 20px;
-      margin-bottom: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    .status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .status-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: #ccc;
-    }
-    .status-dot.connected { background: #4CAF50; animation: pulse 2s infinite; }
-    .status-dot.disconnected { background: #f44336; }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
+  <title>Bảng điều khiển YOLO UNO</title>
 
-    .tabs { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .tab {
-      flex: 1;
-      min-width: 150px;
-      padding: 16px;
-      background: white;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      color: #666;
-    }
-    .tab:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
-    .tab.active { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+  <!-- CSS -->
+  <link rel="stylesheet" href="styles.css">
 
-    .content-section { display: none; animation: fadeIn 0.3s ease; }
-    .content-section.active { display: block; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-    .card {
-      background: white;
-      border-radius: 16px;
-      padding: 24px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-    }
-    .card h2 { color: #333; font-size: 22px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-    .card p { color: #666; font-size: 14px; margin-bottom: 20px; }
-
-    .led-card { background: #f8f9ff; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-    .led-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .led-title { display: flex; align-items: center; gap: 12px; }
-    .led-icon {
-      width: 36px; height: 36px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px; background: white;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-      transition: all 0.3s;
-    }
-    .led-icon.on { background: #ffeb3b; box-shadow: 0 0 20px rgba(255, 235, 59, 0.6); }
-    .led-name { font-size: 18px; font-weight: 600; color: #333; }
-    .led-status { font-size: 12px; color: #888; margin-top: 4px; }
-
-    .toggle-switch { position: relative; width: 56px; height: 30px; }
-    .toggle-switch input { opacity: 0; width: 0; height: 0; }
-    .slider {
-      position: absolute; cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #ccc;
-      transition: 0.3s;
-      border-radius: 30px;
-    }
-    .slider:before {
-      position: absolute; content: "";
-      height: 22px; width: 22px;
-      left: 4px; bottom: 4px;
-      background-color: white;
-      transition: 0.3s;
-      border-radius: 50%;
-    }
-    input:checked + .slider { background: linear-gradient(135deg, #667eea, #764ba2); }
-    input:checked + .slider:before { transform: translateX(26px); }
-
-    .brightness-control { margin-top: 12px; }
-    .brightness-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; color: #666; font-size: 13px; }
-    .brightness-value { font-weight: 700; font-size: 16px; color: #667eea; }
-
-    input[type="range"] {
-      -webkit-appearance: none;
-      width: 100%; height: 6px;
-      border-radius: 5px;
-      background: #ddd;
-      outline: none;
-      transition: background 0.3s;
-    }
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 20px; height: 20px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      cursor: pointer;
-      box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
-    }
-    input[type="range"]:disabled { opacity: 0.3; cursor: not-allowed; }
-
-    .sensor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-    .sensor-item {
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      border-radius: 12px; padding: 20px;
-      color: white; text-align: center;
-    }
-    .sensor-icon { font-size: 40px; margin-bottom: 12px; }
-    .sensor-label { font-size: 14px; opacity: 0.9; margin-bottom: 8px; }
-    .sensor-value { font-size: 32px; font-weight: 700; margin-bottom: 4px; }
-    .sensor-unit { font-size: 16px; opacity: 0.8; }
-    .sensor-status { margin-top: 8px; font-size: 12px; opacity: 0.7; }
-
-    .form-group { margin-bottom: 20px; }
-    .form-group label { display: block; color: #333; font-weight: 600; margin-bottom: 8px; font-size: 14px; }
-    .form-group input, .form-group select {
-      width: 100%; padding: 12px 16px;
-      border: 2px solid #e0e0e0;
-      border-radius: 10px; font-size: 15px;
-      transition: all 0.3s; background: white;
-    }
-    .form-group input:focus, .form-group select:focus {
-      outline: none; border-color: #667eea;
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-    .form-group small { display: block; color: #999; font-size: 12px; margin-top: 4px; }
-
-    .wifi-list { max-height: 300px; overflow-y: auto; border: 2px solid #e0e0e0; border-radius: 10px; margin-bottom: 16px; }
-    .wifi-item {
-      padding: 16px; border-bottom: 1px solid #f0f0f0;
-      cursor: pointer; transition: background 0.3s;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .wifi-item:last-child { border-bottom: none; }
-    .wifi-item:hover { background: #f8f9ff; }
-    .wifi-item.selected { background: #667eea; color: white; }
-    .wifi-info { display: flex; align-items: center; gap: 12px; }
-    .wifi-signal { font-size: 20px; }
-    .wifi-name { font-weight: 600; }
-    .wifi-security { font-size: 12px; opacity: 0.7; }
-
-    .btn {
-      padding: 14px 24px; border: none; border-radius: 10px;
-      font-size: 15px; font-weight: 600; cursor: pointer;
-      transition: all 0.3s;
-      display: inline-flex; align-items: center; gap: 8px; justify-content: center;
-    }
-    .btn-primary {
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      color: white;
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-    }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4); }
-    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-    .btn-secondary { background: #f0f0f0; color: #333; }
-    .btn-secondary:hover { background: #e0e0e0; }
-    .btn-full { width: 100%; }
-    .btn-group { display: flex; gap: 12px; }
-
-    .spinner {
-      border: 3px solid #f3f3f3;
-      border-top: 3px solid #667eea;
-      border-radius: 50%;
-      width: 24px; height: 24px;
-      animation: spin 1s linear infinite;
-      display: inline-block;
-    }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-    .alert {
-      padding: 14px 16px; border-radius: 10px;
-      margin-bottom: 16px; display: none;
-      align-items: center; gap: 10px; font-size: 14px;
-    }
-    .alert.show { display: flex; }
-    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-    .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-    .alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-    .alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
-
-    /* Log Panel */
-    .log-panel {
-      background: #1e1e1e;
-      border-radius: 10px;
-      padding: 16px;
-      margin-top: 20px;
-      max-height: 200px;
-      overflow-y: auto;
-      font-family: 'Consolas', monospace;
-      font-size: 12px;
-    }
-    .log-entry { color: #0f0; margin: 4px 0; }
-    .log-entry.error { color: #f44; }
-    .log-entry.warn { color: #ff0; }
-    .log-entry.info { color: #0af; }
-
-    @media (max-width: 768px) {
-      .tabs { flex-direction: column; }
-      .tab { min-width: 100%; }
-      .btn-group { flex-direction: column; }
-      .header h1 { font-size: 24px; }
-    }
-  </style>
+  <!-- Thư viện -->
+  <script src="https://cdn.jsdelivr.net/npm/raphael@2.3.0/raphael.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/justgage@1.3.5/justgage.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
+
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>🎛️ ESP32 Control Panel</h1>
-      <p>Access Point Mode - Quản lý và điều khiển thiết bị</p>
+
+  <!-- Thanh bên -->
+  <div class="sidebar">
+    <div class="logo-container">
+      <img class="logo-img"
+        src="data:image/png;base64,...(bỏ qua logo cho ngắn)..." alt="Logo">
     </div>
 
-    <!-- Status Bar -->
-    <div class="status-bar">
-      <div class="status-indicator">
-        <div class="status-dot" id="connectionDot"></div>
-        <span id="connectionStatus">Đang kiểm tra...</span>
-      </div>
-      <span id="ipAddress">IP: --</span>
-    </div>
+    <div class="nav-item active" onclick="showSection('home', event)">🏠 <span>Trang chủ</span></div>
+    <div class="nav-item" onclick="showSection('device', event)">⚡ <span>Thiết bị</span></div>
+    <div class="nav-item" onclick="showSection('info', event)">ℹ️ <span>Thông tin</span></div>
+    <div class="nav-item" onclick="showSection('settings', event)">⚙️ <span>Cài đặt</span></div>
+  </div>
 
-    <div class="tabs">
-      <button class="tab active" onclick="showTab('testmode')">🔬 Test Mode</button>
-      <button class="tab" onclick="showTab('wifi')">📶 WiFi Settings</button>
-      <button class="tab" onclick="showTab('ap')">🌐 AP Settings</button>
-      <button class="tab" onclick="showTab('sensor')">🌡️ Sensors</button>
-    </div>
+  <!-- Nội dung chính -->
+  <div class="main-content">
 
-    <!-- Test Mode Section -->
-    <div id="testmode" class="content-section active">
-      <div class="card">
-        <h2>💡 LED Control</h2>
-        <p>Điều khiển độ sáng của 2 LED (Realtime)</p>
+    <!-- TRANG CHỦ -->
+    <div id="home" class="section fade-in">
+      <header>
+        <h1>Bảng điều khiển môi trường</h1>
+        <p>Giám sát nhiệt độ và độ ẩm theo thời gian thực</p>
+      </header>
 
-        <div class="led-card">
-          <div class="led-header">
-            <div class="led-title">
-              <div class="led-icon" id="led1Icon">💡</div>
-              <div>
-                <span class="led-name">LED 1 (GPIO 48)</span>
-                <div class="led-status" id="led1Status">OFF</div>
-              </div>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="led1Toggle">
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="brightness-control">
-            <div class="brightness-label">
-              <span>Độ sáng</span>
-              <span class="brightness-value" id="led1Value">50%</span>
-            </div>
-            <input type="range" id="led1Brightness" min="0" max="100" value="50" disabled>
-          </div>
+      <div class="gauges-container">
+        <div class="gauge-card">
+          <h2>🌡️ Nhiệt độ (°C)</h2>
+          <div id="gauge_temp"></div>
         </div>
 
-        <div class="led-card">
-          <div class="led-header">
-            <div class="led-title">
-              <div class="led-icon" id="led2Icon">💡</div>
-              <div>
-                <span class="led-name">LED 2 (GPIO 41)</span>
-                <div class="led-status" id="led2Status">OFF</div>
-              </div>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="led2Toggle">
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="brightness-control">
-            <div class="brightness-label">
-              <span>Độ sáng</span>
-              <span class="brightness-value" id="led2Value">50%</span>
-            </div>
-            <input type="range" id="led2Brightness" min="0" max="100" value="50" disabled>
-          </div>
-        </div>
-
-        <!-- Debug Log -->
-        <div class="log-panel" id="logPanel">
-          <div class="log-entry info">🚀 ESP32 Control Panel Ready</div>
+        <div class="gauge-card">
+          <h2>💧 Độ ẩm (%)</h2>
+          <div id="gauge_humi"></div>
         </div>
       </div>
     </div>
 
-    <!-- WiFi Settings Section -->
-    <div id="wifi" class="content-section">
-      <div class="card">
-        <h2>📶 WiFi Configuration</h2>
-        <p>Kết nối ESP32 vào mạng WiFi</p>
+    <!-- THIẾT BỊ -->
+    <div id="device" class="section" style="display:none;">
+      <header>
+        <h1>Điều khiển Relay</h1>
+        <p>Quản lý và điều khiển các relay được kết nối.</p>
+      </header>
 
-        <div id="wifiAlert" class="alert"></div>
+      <div class="device-list" id="relayContainer"></div>
 
-        <button class="btn btn-primary btn-full" onclick="scanWiFi()" id="scanBtn">
-          <span>🔍</span><span>Quét mạng WiFi</span>
-        </button>
+      <button class="add-relay-btn" onclick="openAddRelayDialog()">
+        <i class="fa-solid fa-plus"></i>
+      </button>
+    </div>
 
-        <div id="wifiListContainer" style="display: none; margin-top: 20px;">
-          <label style="font-weight: 600; margin-bottom: 8px; display: block;">Chọn mạng WiFi:</label>
-          <div class="wifi-list" id="wifiList"></div>
-        </div>
+    <!-- THÔNG TIN -->
+    <div id="info" class="section" style="display:none;">
+      <header>
+        <h1>Thông tin thiết bị</h1>
+        <p>Chi tiết hệ thống và firmware sẽ hiển thị tại đây.</p>
+      </header>
+    </div>
 
-        <div class="form-group" style="margin-top: 20px;">
-          <label>Tên WiFi (SSID)</label>
-          <input type="text" id="wifiSSID" placeholder="Nhập tên WiFi hoặc chọn từ danh sách">
-        </div>
+    <!-- CÀI ĐẶT -->
+    <div id="settings" class="section settings-section" style="display:none;">
+      <div class="settings-card">
+        <h2><i class="fa-solid fa-gear"></i> Cấu hình thiết bị</h2>
+        <p>Nhập thông tin Wi-Fi và MQTT CoreIOT của bạn bên dưới.</p>
 
-        <div class="form-group">
-          <label>Mật khẩu WiFi</label>
-          <input type="password" id="wifiPassword" placeholder="Nhập mật khẩu WiFi">
-        </div>
+        <form id="settingsForm">
+          <!-- WiFi -->
+          <div class="input-group">
+            <i class="fa-solid fa-wifi"></i>
+            <input type="text" id="ssid" placeholder="Tên Wi-Fi (SSID)" required>
+          </div>
 
-        <div class="btn-group">
-          <button class="btn btn-primary" onclick="connectWiFi()" id="connectBtn" style="flex: 1;">
-            <span>✅</span><span>Kết nối</span>
+          <div class="input-group">
+            <i class="fa-solid fa-lock"></i>
+            <input type="password" id="password" placeholder="Mật khẩu Wi-Fi" required>
+          </div>
+
+          <!-- CoreIOT MQTT -->
+          <div class="input-group">
+            <i class="fa-solid fa-server"></i>
+            <input type="text" id="server" placeholder="Server (app.coreiot.io)" required>
+          </div>
+
+          <div class="input-group">
+            <i class="fa-solid fa-plug"></i>
+            <input type="number" id="port" placeholder="Port (1883)" required>
+          </div>
+
+          <div class="input-group">
+            <i class="fa-solid fa-fingerprint"></i>
+            <input type="text" id="client_id" placeholder="Client ID (MQTT)" required>
+          </div>
+
+          <div class="input-group">
+            <i class="fa-solid fa-user"></i>
+            <input type="text" id="mqtt_username" placeholder="Username (MQTT)" required>
+          </div>
+
+          <div class="input-group">
+            <i class="fa-solid fa-key"></i>
+            <input type="password" id="mqtt_password" placeholder="Password (MQTT)">
+          </div>
+
+          <button type="submit" class="btn-save">
+            <i class="fa-solid fa-floppy-disk"></i> Lưu cấu hình
           </button>
-          <button class="btn btn-secondary" onclick="clearWiFiForm()">
-            <span>🔄</span><span>Reset</span>
-          </button>
-        </div>
-
-        <!-- Connection Progress -->
-        <div id="connectionProgress" style="display: none; margin-top: 20px; text-align: center;">
-          <div class="spinner"></div>
-          <p style="margin-top: 10px; color: #666;">Đang kết nối WiFi... Vui lòng đợi</p>
-          <p style="font-size: 12px; color: #999;">Quá trình có thể mất 10-15 giây</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- AP Settings Section -->
-    <div id="ap" class="content-section">
-      <div class="card">
-        <h2>🌐 Access Point Configuration</h2>
-        <p>Tùy chỉnh tên và mật khẩu của Access Point</p>
-        <div id="apAlert" class="alert"></div>
-        <div class="form-group">
-          <label>Tên Access Point (SSID)</label>
-          <input type="text" id="apSSID" placeholder="ESP32-Setup-Wifi" value="ESP32-Setup-Wifi">
-        </div>
-        <div class="form-group">
-          <label>Mật khẩu Access Point</label>
-          <input type="password" id="apPassword" placeholder="123456789" value="123456789">
-          <small>Tối thiểu 8 ký tự</small>
-        </div>
-        <button class="btn btn-primary btn-full" onclick="saveAPConfig()">
-          <span>💾</span><span>Lưu cấu hình AP</span>
-        </button>
-        <div style="margin-top: 20px; padding: 16px; background: #fff3cd; border-radius: 10px;">
-          <strong>⚠️ Lưu ý:</strong> Sau khi lưu, ESP32 sẽ khởi động lại. Bạn cần kết nối lại với tên mới.
-        </div>
-      </div>
-    </div>
-
-    <!-- Sensor Section -->
-    <div id="sensor" class="content-section">
-      <div class="card">
-        <h2>🌡️ Sensor Monitor</h2>
-        <p>Dữ liệu từ cảm biến DHT20</p>
-        <div class="sensor-grid">
-          <div class="sensor-item">
-            <div class="sensor-icon">🌡️</div>
-            <div class="sensor-label">Nhiệt độ</div>
-            <div class="sensor-value" id="tempValue">--</div>
-            <div class="sensor-unit">°C</div>
-            <div class="sensor-status" id="tempStatus">Đang đọc...</div>
-          </div>
-          <div class="sensor-item">
-            <div class="sensor-icon">💧</div>
-            <div class="sensor-label">Độ ẩm</div>
-            <div class="sensor-value" id="humiValue">--</div>
-            <div class="sensor-unit">%</div>
-            <div class="sensor-status" id="humiStatus">Đang đọc...</div>
-          </div>
-        </div>
-        <button class="btn btn-secondary btn-full" onclick="refreshSensor()" style="margin-top: 20px;">
-          <span>🔄</span><span>Làm mới dữ liệu</span>
-        </button>
+        </form>
       </div>
     </div>
   </div>
 
-  <script>
-    // ==================== DEBOUNCE UTILITY ====================
-    function debounce(func, wait) {
-      let timeout;
-      return function(...args) {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(this, args), wait);
-      };
-    }
+  <!-- HỘP THOẠI THÊM RELAY -->
+  <div id="addRelayDialog" class="dialog-overlay" style="display:none;">
+    <div class="dialog fade-in">
+      <h3><i class="fa-solid fa-plug"></i> Thêm relay mới</h3>
+      <p>Nhập tên relay và chân GPIO</p>
+      <div class="input-field">
+        <input type="text" id="relayName" placeholder="Tên relay">
+      </div>
+      <div class="input-field">
+        <input type="number" id="relayGPIO" placeholder="Chân GPIO">
+      </div>
+      <div class="dialog-buttons">
+        <button class="confirm" onclick="saveRelay()">Lưu</button>
+        <button class="cancel" onclick="closeAddRelayDialog()">Hủy</button>
+      </div>
+    </div>
+  </div>
 
-    // ==================== LOGGING ====================
-    function addLog(message, type = 'info') {
-      const logPanel = document.getElementById('logPanel');
-      const entry = document.createElement('div');
-      entry.className = `log-entry ${type}`;
-      const time = new Date().toLocaleTimeString();
-      entry.textContent = `[${time}] ${message}`;
-      logPanel.appendChild(entry);
-      logPanel.scrollTop = logPanel.scrollHeight;
-      
-      // Keep only last 50 entries
-      while (logPanel.children.length > 50) {
-        logPanel.removeChild(logPanel.firstChild);
-      }
-    }
+  <!-- HỘP THOẠI XÓA -->
+  <div id="confirmDeleteDialog" class="dialog-overlay" style="display:none;">
+    <div class="dialog warning fade-in">
+      <h3>⚠️ Xác nhận xóa</h3>
+      <p>Bạn có chắc chắn muốn xóa relay này không?</p>
+      <div class="dialog-buttons">
+        <button class="danger" onclick="confirmDelete()">Xóa</button>
+        <button class="cancel" onclick="closeConfirmDelete()">Hủy</button>
+      </div>
+    </div>
+  </div>
 
-    // ==================== TAB NAVIGATION ====================
-    function showTab(tabName) {
-      document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.getElementById(tabName).classList.add('active');
-      event.target.classList.add('active');
-      
-      if (tabName === 'sensor') refreshSensor();
-    }
-
-    // ==================== LED CONTROL (FIXED) ====================
-    let ledStates = {
-      1: { isOn: false, brightness: 50 },
-      2: { isOn: false, brightness: 50 }
-    };
-
-    // Debounced LED control to prevent flooding
-    const debouncedControlLED = debounce(function(device, state, brightness) {
-      const url = `/control?device=${device}&state=${state}&brightness=${brightness}`;
-      addLog(`📤 Sending: LED${device} ${state} @ ${brightness}%`);
-      
-      fetch(url)
-        .then(response => {
-          if (!response.ok) throw new Error('Network error');
-          return response.text();
-        })
-        .then(data => {
-          addLog(`✅ LED${device}: ${state} @ ${brightness}%`, 'info');
-          updateLEDUI(device, state === 'ON', brightness);
-        })
-        .catch(err => {
-          addLog(`❌ Error: ${err.message}`, 'error');
-        });
-    }, 100); // 100ms debounce
-
-    function controlLED(device, state, brightness) {
-      debouncedControlLED(device, state, brightness);
-    }
-
-    function updateLEDUI(device, isOn, brightness) {
-      const icon = document.getElementById(`led${device}Icon`);
-      const status = document.getElementById(`led${device}Status`);
-      
-      if (isOn) {
-        icon.classList.add('on');
-        status.textContent = `ON - ${brightness}%`;
-      } else {
-        icon.classList.remove('on');
-        status.textContent = 'OFF';
-      }
-    }
-
-    function initLEDControls() {
-      [1, 2].forEach(num => {
-        const toggle = document.getElementById(`led${num}Toggle`);
-        const slider = document.getElementById(`led${num}Brightness`);
-        const value = document.getElementById(`led${num}Value`);
-
-        toggle.addEventListener('change', function() {
-          const isOn = this.checked;
-          slider.disabled = !isOn;
-          ledStates[num].isOn = isOn;
-          
-          if (isOn) {
-            controlLED(num, 'ON', slider.value);
-          } else {
-            controlLED(num, 'OFF', 0);
-          }
-        });
-
-        // Use 'change' event instead of 'input' for final value only
-        // Or use debounced 'input' for realtime
-        slider.addEventListener('input', function() {
-          value.textContent = this.value + '%';
-          ledStates[num].brightness = parseInt(this.value);
-          
-          if (toggle.checked) {
-            controlLED(num, 'ON', this.value);
-          }
-        });
-      });
-      
-      addLog('🎮 LED Controls initialized');
-    }
-
-    // ==================== WIFI FUNCTIONS ====================
-    function scanWiFi() {
-      const scanBtn = document.getElementById('scanBtn');
-      scanBtn.disabled = true;
-      scanBtn.innerHTML = '<div class="spinner"></div><span>Đang quét...</span>';
-      showAlert('wifiAlert', 'Đang quét mạng WiFi...', 'info');
-      
-      fetch('/scan')
-        .then(response => response.json())
-        .then(data => {
-          if (data.networks && data.networks.length > 0) {
-            const wifiList = document.getElementById('wifiList');
-            wifiList.innerHTML = '';
-            
-            data.networks.forEach(network => {
-              const item = document.createElement('div');
-              item.className = 'wifi-item';
-              item.onclick = () => selectWiFi(network.ssid, network.encryption, item);
-              
-              const signal = network.rssi > -50 ? '📶' : (network.rssi > -70 ? '📶' : '📶');
-              const lock = network.encryption !== 'Open' ? '🔒' : '🔓';
-              
-              item.innerHTML = `
-                <div class="wifi-info">
-                  <span class="wifi-signal">${signal}</span>
-                  <div>
-                    <div class="wifi-name">${network.ssid}</div>
-                    <div class="wifi-security">${lock} ${network.encryption} | ${network.rssi} dBm</div>
-                  </div>
-                </div>
-              `;
-              wifiList.appendChild(item);
-            });
-            
-            document.getElementById('wifiListContainer').style.display = 'block';
-            showAlert('wifiAlert', `✅ Tìm thấy ${data.networks.length} mạng WiFi`, 'success');
-          } else {
-            showAlert('wifiAlert', 'Không tìm thấy mạng WiFi nào', 'warning');
-          }
-        })
-        .catch(err => {
-          showAlert('wifiAlert', '❌ Lỗi quét WiFi: ' + err.message, 'error');
-        })
-        .finally(() => {
-          scanBtn.disabled = false;
-          scanBtn.innerHTML = '<span>🔍</span><span>Quét mạng WiFi</span>';
-        });
-    }
-
-    function selectWiFi(ssid, encryption, element) {
-      document.getElementById('wifiSSID').value = ssid;
-      document.querySelectorAll('.wifi-item').forEach(i => i.classList.remove('selected'));
-      element.classList.add('selected');
-      
-      if (encryption !== 'Open') {
-        document.getElementById('wifiPassword').focus();
-      }
-    }
-
-    function connectWiFi() {
-      const ssid = document.getElementById('wifiSSID').value.trim();
-      const password = document.getElementById('wifiPassword').value;
-      const connectBtn = document.getElementById('connectBtn');
-      const progress = document.getElementById('connectionProgress');
-      
-      if (!ssid) {
-        showAlert('wifiAlert', '⚠️ Vui lòng nhập tên WiFi!', 'error');
-        return;
-      }
-      
-      // Show progress
-      connectBtn.disabled = true;
-      progress.style.display = 'block';
-      showAlert('wifiAlert', '🔄 Đang kết nối WiFi...', 'info');
-      
-      const url = `/connect?ssid=${encodeURIComponent(ssid)}&pass=${encodeURIComponent(password)}`;
-      
-      fetch(url)
-        .then(response => response.text())
-        .then(data => {
-          showAlert('wifiAlert', '✅ Yêu cầu kết nối đã gửi! ESP32 đang xử lý...', 'success');
-          
-          // Poll for connection status
-          let attempts = 0;
-          const maxAttempts = 20;
-          
-          const checkConnection = setInterval(() => {
-            attempts++;
-            
-            if (attempts >= maxAttempts) {
-              clearInterval(checkConnection);
-              progress.style.display = 'none';
-              connectBtn.disabled = false;
-              showAlert('wifiAlert', '⚠️ Timeout! Kiểm tra Serial Monitor để xem kết quả', 'warning');
-              return;
-            }
-            
-            // Try to reach the device
-            fetch('/sensor', { signal: AbortSignal.timeout(2000) })
-              .then(r => {
-                if (r.ok) {
-                  clearInterval(checkConnection);
-                  progress.style.display = 'none';
-                  connectBtn.disabled = false;
-                  showAlert('wifiAlert', '✅ Kết nối thành công! ESP32 đã online', 'success');
-                  checkDeviceStatus();
-                }
-              })
-              .catch(() => {
-                // Still connecting...
-                console.log(`Checking... attempt ${attempts}/${maxAttempts}`);
-              });
-          }, 1000);
-        })
-        .catch(err => {
-          progress.style.display = 'none';
-          connectBtn.disabled = false;
-          showAlert('wifiAlert', '❌ Lỗi: ' + err.message, 'error');
-        });
-    }
-
-    function clearWiFiForm() {
-      document.getElementById('wifiSSID').value = '';
-      document.getElementById('wifiPassword').value = '';
-      document.querySelectorAll('.wifi-item').forEach(i => i.classList.remove('selected'));
-    }
-
-    // ==================== AP SETTINGS ====================
-    function saveAPConfig() {
-      const ssid = document.getElementById('apSSID').value.trim();
-      const password = document.getElementById('apPassword').value;
-      
-      if (!ssid) {
-        showAlert('apAlert', '⚠️ Vui lòng nhập tên AP!', 'error');
-        return;
-      }
-      
-      if (password && password.length < 8) {
-        showAlert('apAlert', '⚠️ Mật khẩu phải có ít nhất 8 ký tự!', 'error');
-        return;
-      }
-      
-      showAlert('apAlert', '🔄 Đang lưu...', 'info');
-      
-      fetch(`/apconfig?ssid=${encodeURIComponent(ssid)}&pass=${encodeURIComponent(password)}`)
-        .then(response => response.text())
-        .then(data => {
-          showAlert('apAlert', '✅ Đã lưu! ESP32 sẽ khởi động lại trong 3 giây...', 'success');
-          setTimeout(() => {
-            showAlert('apAlert', `🔄 Đang khởi động lại... Kết nối WiFi mới: ${ssid}`, 'warning');
-          }, 3000);
-        })
-        .catch(err => {
-          showAlert('apAlert', '❌ Lỗi: ' + err.message, 'error');
-        });
-    }
-
-    // ==================== SENSOR ====================
-    function refreshSensor() {
-      document.getElementById('tempValue').textContent = '--';
-      document.getElementById('humiValue').textContent = '--';
-      document.getElementById('tempStatus').textContent = 'Đang đọc...';
-      document.getElementById('humiStatus').textContent = 'Đang đọc...';
-      
-      fetch('/sensor')
-        .then(response => response.json())
-        .then(data => {
-          const time = new Date().toLocaleTimeString();
-          if (data.error) {
-            document.getElementById('tempValue').textContent = 'N/A';
-            document.getElementById('humiValue').textContent = 'N/A';
-            document.getElementById('tempStatus').textContent = '❌ Không có cảm biến';
-            document.getElementById('humiStatus').textContent = '❌ Không có cảm biến';
-          } else {
-            document.getElementById('tempValue').textContent = data.temperature.toFixed(1);
-            document.getElementById('humiValue').textContent = data.humidity.toFixed(1);
-            document.getElementById('tempStatus').textContent = `✅ ${time}`;
-            document.getElementById('humiStatus').textContent = `✅ ${time}`;
-          }
-        })
-        .catch(err => {
-          document.getElementById('tempValue').textContent = 'ERR';
-          document.getElementById('humiValue').textContent = 'ERR';
-          document.getElementById('tempStatus').textContent = '❌ Lỗi kết nối';
-          document.getElementById('humiStatus').textContent = '❌ Lỗi kết nối';
-        });
-    }
-
-    // Auto refresh sensor
-    let sensorInterval = setInterval(() => {
-      if (document.getElementById('sensor').classList.contains('active')) {
-        refreshSensor();
-      }
-    }, 5000);
-
-    // ==================== UTILITIES ====================
-    function showAlert(elementId, message, type) {
-      const alert = document.getElementById(elementId);
-      alert.className = `alert alert-${type} show`;
-      
-      const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
-      alert.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${message}</span>`;
-      
-      if (type !== 'info') {
-        setTimeout(() => alert.classList.remove('show'), 8000);
-      }
-    }
-
-    function checkDeviceStatus() {
-      fetch('/sensor', { signal: AbortSignal.timeout(3000) })
-        .then(response => {
-          if (response.ok) {
-            document.getElementById('connectionDot').className = 'status-dot connected';
-            document.getElementById('connectionStatus').textContent = 'Đã kết nối';
-            document.getElementById('ipAddress').textContent = 'IP: ' + window.location.hostname;
-          }
-        })
-        .catch(() => {
-          document.getElementById('connectionDot').className = 'status-dot disconnected';
-          document.getElementById('connectionStatus').textContent = 'Mất kết nối';
-        });
-    }
-
-    // ==================== INIT ====================
-    window.addEventListener('load', function() {
-      initLEDControls();
-      checkDeviceStatus();
-      setInterval(checkDeviceStatus, 10000);
-      addLog('✅ ESP32 Control Panel loaded');
-    });
-  </script>
+  <!-- JS -->
+  <script src="script.js"></script>
 </body>
+
 </html>
