@@ -7,25 +7,22 @@
 #include "task_check_info.h"
 #include "mainserver.h"
 
-// ✅ LED PWM Config
+// ==================== LED CONFIG ====================
 #define LED1_PIN 48
 #define LED2_PIN 41
 #define PWM_FREQ 5000
-#define PWM_RESOLUTION 8 // 0-255
-#define PWM_CHANNEL_1 0
-#define PWM_CHANNEL_2 1
+#define PWM_RESOLUTION 8
 
-// ✅ LED State
 struct LEDState {
   bool isOn;
-  int brightness; // 0-100
-  int pwmValue;   // 0-255
+  int brightness;
+  int pwmValue;
 };
 
 LEDState led1 = {false, 50, 127};
 LEDState led2 = {false, 50, 127};
 
-// Extern variables
+// ==================== EXTERN VARIABLES ====================
 extern String ssid;
 extern String password;
 extern String wifi_ssid;
@@ -34,279 +31,80 @@ extern bool isWifiConnected;
 extern SemaphoreHandle_t xBinarySemaphoreInternet;
 extern String WIFI_SSID;
 extern String WIFI_PASS;
-extern void Save_info_File(String wifi_ssid, String wifi_pass,
-                           String token, String server, String port);
+extern void Save_info_File(String, String, String, String, String);
+extern float glob_temperature;
+extern float glob_humidity;
 
+// ==================== GLOBAL VARIABLES ====================
 WebServer server(80);
-
 bool isAPMode = false;
 bool connecting = false;
 unsigned long connect_start_ms = 0;
+String ap_ssid = "ESP32-Setup-Wifi";
+String ap_password = "123456789";
 
 // ==================== PWM FUNCTIONS ====================
 void setupPWM() {
-  ledcSetup(PWM_CHANNEL_1, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_2, PWM_FREQ, PWM_RESOLUTION);
+  Serial.println("🔧 Setting up PWM...");
   
-  ledcAttachPin(LED1_PIN, PWM_CHANNEL_1);
-  ledcAttachPin(LED2_PIN, PWM_CHANNEL_2);
+  // ✅ Use new ESP32 Arduino Core 3.x API
+  #if ESP_ARDUINO_VERSION_MAJOR >= 3
+    if (!ledcAttach(LED1_PIN, PWM_FREQ, PWM_RESOLUTION)) {
+      Serial.println("❌ Failed to attach LED1");
+    }
+    if (!ledcAttach(LED2_PIN, PWM_FREQ, PWM_RESOLUTION)) {
+      Serial.println("❌ Failed to attach LED2");
+    }
+  #else
+    // Old API for Arduino Core 2.x
+    ledcSetup(0, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(1, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttachPin(LED1_PIN, 0);
+    ledcAttachPin(LED2_PIN, 1);
+  #endif
   
-  // Start with LEDs OFF
-  ledcWrite(PWM_CHANNEL_1, 0);
-  ledcWrite(PWM_CHANNEL_2, 0);
+  // Start OFF
+  ledcWrite(LED1_PIN, 0);
+  ledcWrite(LED2_PIN, 0);
   
-  Serial.println("✅ PWM initialized (LED1: GPIO48, LED2: GPIO41)");
+  Serial.println("✅ PWM initialized (LED1:GPIO48, LED2:GPIO41)");
 }
 
-void setLED(int ledNum, bool state, int brightness) {
-  LEDState* led = (ledNum == 1) ? &led1 : &led2;
-  int channel = (ledNum == 1) ? PWM_CHANNEL_1 : PWM_CHANNEL_2;
+void setLED(int num, bool state, int brightness) {
+  LEDState* led = (num == 1) ? &led1 : &led2;
+  uint8_t pin = (num == 1) ? LED1_PIN : LED2_PIN;
   
   led->isOn = state;
   led->brightness = constrain(brightness, 0, 100);
   
-  if (state) {
-    // Map 0-100 to 0-255
+  if (state && brightness > 0) {
     led->pwmValue = map(led->brightness, 0, 100, 0, 255);
-    ledcWrite(channel, led->pwmValue);
-    Serial.printf("💡 LED%d ON - Brightness: %d%% (PWM: %d)\n", 
-                  ledNum, led->brightness, led->pwmValue);
+    ledcWrite(pin, led->pwmValue);
+    Serial.printf("💡 LED%d: ON @ %d%% (PWM:%d)\n", num, led->brightness, led->pwmValue);
   } else {
     led->pwmValue = 0;
-    ledcWrite(channel, 0);
-    Serial.printf("💡 LED%d OFF\n", ledNum);
+    ledcWrite(pin, 0);
+    Serial.printf("💡 LED%d: OFF\n", num);
   }
 }
 
-// ==================== HTML PAGES ====================
+// ==================== HTML PAGE ====================
 String mainPage() {
-  // ✅ SERVE FROM LITTLEFS (PRIORITY)
-  if (LittleFS.exists("/index.html")) {
-    File file = LittleFS.open("/index.html", "r");
-    if (file) {
-      String html = file.readString();
-      file.close();
-      Serial.println("📄 Serving /index.html from LittleFS");
+  if (LittleFS.exists("/config.html")) {
+    File f = LittleFS.open("/config.html", "r");
+    if (f) {
+      String html = f.readString();
+      f.close();
       return html;
     }
   }
-  
-  // ❌ FALLBACK: Simple HTML nếu không có file
-  Serial.println("⚠️ /index.html not found in LittleFS, using fallback");
-  return R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>ESP32 - Upload Required</title>
-  <style>
-    body { font-family: Arial; display: flex; justify-content: center; align-items: center; 
-           min-height: 100vh; background: linear-gradient(135deg, #667eea, #764ba2); margin: 0; }
-    .box { background: white; padding: 40px; border-radius: 20px; text-align: center; 
-           box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 400px; }
-    h1 { color: #667eea; margin-bottom: 20px; }
-    p { color: #666; line-height: 1.6; }
-    a { display: inline-block; margin-top: 20px; padding: 12px 24px; background: #667eea; 
-        color: white; text-decoration: none; border-radius: 8px; }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <h1>⚠️ Files Missing</h1>
-    <p>Please upload <strong>index.html</strong>, <strong>script.js</strong>, and <strong>styles.css</strong> to LittleFS.</p>
-    <p>Use PlatformIO Upload Filesystem Image or Arduino IDE Data Upload.</p>
-    <a href="/settings">Go to Wi-Fi Settings</a>
-  </div>
-</body>
-</html>
-)rawliteral";
-}
-
-String settingsPage() {
-  // ✅ MINIMAL SETTINGS PAGE (không cần file riêng)
-  return R"rawliteral(
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cấu hình Wi-Fi</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg, #1e90ff, #00e6b8);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      margin: 0;
-    }
-    .card {
-      background: white;
-      padding: 40px;
-      border-radius: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-      width: 100%;
-      max-width: 360px;
-      text-align: center;
-    }
-    h2 {
-      color: #1e90ff;
-      margin-bottom: 10px;
-    }
-    p {
-      color: #666;
-      margin-bottom: 25px;
-      font-size: 14px;
-    }
-    input {
-      width: 100%;
-      padding: 12px 16px;
-      margin: 10px 0;
-      border-radius: 12px;
-      border: 2px solid #e0e0e0;
-      font-size: 15px;
-      box-sizing: border-box;
-      transition: all 0.3s;
-    }
-    input:focus {
-      outline: none;
-      border-color: #1e90ff;
-      box-shadow: 0 0 0 3px rgba(30, 144, 255, 0.1);
-    }
-    .btn-row {
-      margin-top: 20px;
-      display: flex;
-      gap: 12px;
-    }
-    button {
-      flex: 1;
-      border: none;
-      border-radius: 12px;
-      padding: 12px 20px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s;
-    }
-    .btn-primary {
-      background: linear-gradient(90deg, #1e90ff, #00e6b8);
-      color: white;
-    }
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(30, 144, 255, 0.3);
-    }
-    .btn-secondary {
-      background: #f1f5ff;
-      color: #345;
-    }
-    .btn-secondary:hover {
-      background: #e0e8ff;
-    }
-    #msg {
-      margin-top: 15px;
-      padding: 12px;
-      border-radius: 10px;
-      font-size: 14px;
-      display: none;
-    }
-    #msg.show {
-      display: block;
-    }
-    #msg.success {
-      background: #d4edda;
-      color: #155724;
-    }
-    #msg.error {
-      background: #f8d7da;
-      color: #721c24;
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h2>⚙️ Cấu hình Wi-Fi</h2>
-    <p>Nhập thông tin Wi-Fi để kết nối ESP32 vào mạng của bạn</p>
-    
-    <input id="ssid" placeholder="Tên Wi-Fi (SSID)" autocomplete="off" />
-    <input id="pass" type="password" placeholder="Mật khẩu" autocomplete="off" />
-    
-    <div class="btn-row">
-      <button class="btn-primary" onclick="sendConfig()">Kết nối</button>
-      <button class="btn-secondary" onclick="history.back()">Quay lại</button>
-    </div>
-    
-    <div id="msg"></div>
-  </div>
-
-  <script>
-    function sendConfig() {
-      const ssid = document.getElementById('ssid').value.trim();
-      const pass = document.getElementById('pass').value.trim();
-      const msg = document.getElementById('msg');
-
-      if (!ssid) {
-        showMessage('Vui lòng nhập tên Wi-Fi!', 'error');
-        return;
-      }
-
-      showMessage('Đang gửi cấu hình...', 'success');
-
-      fetch('/connect?ssid=' + encodeURIComponent(ssid) + '&pass=' + encodeURIComponent(pass))
-        .then(res => res.text())
-        .then(txt => {
-          showMessage('✅ ' + txt, 'success');
-        })
-        .catch(err => {
-          showMessage('❌ Lỗi: ' + err, 'error');
-        });
-    }
-
-    function showMessage(text, type) {
-      const msg = document.getElementById('msg');
-      msg.textContent = text;
-      msg.className = 'show ' + type;
-    }
-  </script>
-</body>
-</html>
-)rawliteral";
+  return "<!DOCTYPE html><html><body><h1>Upload config.html</h1></body></html>";
 }
 
 // ==================== HTTP HANDLERS ====================
 void handleRoot() {
+  Serial.println("📥 GET /");
   server.send(200, "text/html", mainPage());
-}
-
-void handleSettings() {
-  server.send(200, "text/html", settingsPage());
-}
-
-void handleConnect() {
-  Serial.println("\n===== /connect called =====");
-  
-  wifi_ssid = server.arg("ssid");
-  wifi_password = server.arg("pass");
-  
-  Serial.println("SSID from web: " + wifi_ssid);
-  Serial.println("PASS length: " + String(wifi_password.length()));
-  
-  // Update global variables
-  WIFI_SSID = wifi_ssid;
-  WIFI_PASS = wifi_password;
-  
-  // ✅ SAVE TO FILE
-  Save_info_File(WIFI_SSID, WIFI_PASS, CORE_IOT_TOKEN, CORE_IOT_SERVER, CORE_IOT_PORT);
-  Serial.println("💾 Saved WiFi to /info.dat");
-  
-  // Response
-  server.send(200, "text/plain", "Đang kết nối... Xem Serial Monitor");
-  
-  // Start STA connection
-  connecting = true;
-  connect_start_ms = millis();
-  connectToWiFi();
 }
 
 void handleControl() {
@@ -314,137 +112,181 @@ void handleControl() {
   String state = server.arg("state");
   int brightness = server.arg("brightness").toInt();
   
-  Serial.printf("📥 Control: LED%d = %s, Brightness = %d%%\n", 
-                device, state.c_str(), brightness);
+  Serial.println("\n======== LED CONTROL ========");
+  Serial.printf("Device:%d State:%s Bright:%d%%\n", device, state.c_str(), brightness);
   
-  bool isOn = (state == "ON");
+  if (device < 1 || device > 2) {
+    server.send(400, "text/plain", "Invalid device");
+    return;
+  }
+  
+  bool isOn = (state == "ON" || state == "on");
   setLED(device, isOn, brightness);
   
-  server.send(200, "text/plain", "OK");
+  String json = "{\"ok\":true,\"led\":" + String(device) + 
+                ",\"state\":\"" + (isOn?"ON":"OFF") + 
+                "\",\"brightness\":" + String(brightness) + "}";
+  server.send(200, "application/json", json);
+  Serial.println("=============================\n");
 }
 
-// ✅ SERVE STATIC FILES FROM LITTLEFS
-void handleStaticFile(String path, String contentType) {
+void handleScan() {
+  Serial.println("📥 GET /scan");
+  int n = WiFi.scanNetworks();
+  
+  String json = "{\"networks\":[";
+  for (int i = 0; i < n; i++) {
+    if (i > 0) json += ",";
+    json += "{\"ssid\":\"" + WiFi.SSID(i) + "\",";
+    json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
+    json += "\"encryption\":\"";
+    switch (WiFi.encryptionType(i)) {
+      case WIFI_AUTH_OPEN: json += "Open"; break;
+      case WIFI_AUTH_WPA2_PSK: json += "WPA2"; break;
+      default: json += "Protected";
+    }
+    json += "\"}";
+  }
+  json += "]}";
+  
+  server.send(200, "application/json", json);
+  Serial.printf("✅ Found %d networks\n", n);
+}
+
+void handleConnect() {
+  Serial.println("\n======== WIFI CONNECT ========");
+  
+  wifi_ssid = server.arg("ssid");
+  wifi_password = server.arg("pass");
+  
+  Serial.println("SSID: " + wifi_ssid);
+  
+  if (wifi_ssid.isEmpty()) {
+    server.send(400, "text/plain", "SSID required");
+    return;
+  }
+  
+  WIFI_SSID = wifi_ssid;
+  WIFI_PASS = wifi_password;
+  
+  // ✅ Send response BEFORE saving (which causes restart)
+  server.send(200, "text/plain", "Connecting to: " + wifi_ssid);
+  delay(100);  // Let response send
+  
+  // Save and restart
+  Save_info_File(WIFI_SSID, WIFI_PASS, "", "", "");
+  Serial.println("==============================\n");
+}
+
+void handleAPConfig() {
+  String newSSID = server.arg("ssid");
+  String newPass = server.arg("pass");
+  
+  if (newSSID.isEmpty()) {
+    server.send(400, "text/plain", "SSID required");
+    return;
+  }
+  if (!newPass.isEmpty() && newPass.length() < 8) {
+    server.send(400, "text/plain", "Password min 8 chars");
+    return;
+  }
+  
+  File f = LittleFS.open("/ap_config.txt", "w");
+  if (f) { f.println(newSSID); f.println(newPass); f.close(); }
+  
+  server.send(200, "text/plain", "Saved! Restarting...");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleSensor() {
+  String json;
+  if (isnan(glob_temperature) || glob_temperature == -1) {
+    json = "{\"error\":true,\"temperature\":0,\"humidity\":0}";
+  } else {
+    json = "{\"error\":false,\"temperature\":" + String(glob_temperature, 1) + 
+           ",\"humidity\":" + String(glob_humidity, 1) + "}";
+  }
+  server.send(200, "application/json", json);
+}
+
+void handleStatic(String path, String type) {
   if (LittleFS.exists(path)) {
-    File file = LittleFS.open(path, "r");
-    if (file) {
-      server.streamFile(file, contentType);
-      file.close();
-      Serial.println("📄 Served: " + path);
-      return;
+    File f = LittleFS.open(path, "r");
+    if (f) { server.streamFile(f, type); f.close(); return; }
+  }
+  server.send(404, "text/plain", "Not found");
+}
+
+// ==================== AP FUNCTIONS ====================
+void startAP() {
+  Serial.println("\n======== START AP ========");
+  
+  // Load saved config
+  if (LittleFS.exists("/ap_config.txt")) {
+    File f = LittleFS.open("/ap_config.txt", "r");
+    if (f) {
+      ap_ssid = f.readStringUntil('\n'); ap_ssid.trim();
+      ap_password = f.readStringUntil('\n'); ap_password.trim();
+      f.close();
     }
   }
   
-  server.send(404, "text/plain", "File not found: " + path);
-  Serial.println("❌ 404: " + path);
-}
-
-// ==================== WIFI FUNCTIONS ====================
-void startAP() {
-  Serial.println("\n=== Starting AP Mode ===");
-  Serial.println("SSID: " + ssid);
-  Serial.println("PASS: " + password);
+  Serial.println("AP SSID: " + ap_ssid);
   
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ssid.c_str(), password.c_str());
+  // ✅ DON'T change WiFi mode here - it's already set in setup()
+  // Just configure the AP
+  if (ap_password.length() >= 8) {
+    WiFi.softAP(ap_ssid.c_str(), ap_password.c_str());
+  } else {
+    WiFi.softAP(ap_ssid.c_str());
+  }
   
-  IPAddress ip = WiFi.softAPIP();
+  delay(100);  // Wait for AP to start
+  
   Serial.print("AP IP: ");
-  Serial.println(ip);
+  Serial.println(WiFi.softAPIP());
+  Serial.println("==========================\n");
   
   isAPMode = true;
 }
 
-void connectToWiFi() {
-  if (wifi_ssid.isEmpty()) {
-    Serial.println("❌ SSID empty, cannot connect!");
-    return;
-  }
-  
-  Serial.println("\n=== Connecting to WiFi ===");
-  Serial.println("SSID: " + wifi_ssid);
-  Serial.println("PASS length: " + String(wifi_password.length()));
-  
-  WiFi.mode(WIFI_STA);
-  
-  if (wifi_password.isEmpty()) {
-    WiFi.begin(wifi_ssid.c_str());
-  } else {
-    WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
-  }
-}
-
-// ==================== MAIN TASK ====================
+// ==================== MAIN SERVER TASK ====================
 void main_server_task(void *pvParameters) {
-  Serial.println("\n=== Main Server Task Started ===");
+  Serial.println("\n📡 Main Server Task Starting...");
   
-  // ✅ Initialize PWM
+  // ✅ Wait a bit for WiFi stack to be fully ready
+  vTaskDelay(500 / portTICK_PERIOD_MS);
+  
+  // Setup PWM
   setupPWM();
   
-  // Start AP if not already in AP/STA mode
-  if (WiFi.getMode() != WIFI_AP && WiFi.getMode() != WIFI_AP_STA) {
-    startAP();
-  }
+  // Start AP
+  startAP();
   
-  // ✅ Register HTTP routes
+  // ✅ Register routes
   server.on("/", HTTP_GET, handleRoot);
-  server.on("/settings", HTTP_GET, handleSettings);
-  server.on("/connect", HTTP_GET, handleConnect);
   server.on("/control", HTTP_GET, handleControl);
+  server.on("/scan", HTTP_GET, handleScan);
+  server.on("/connect", HTTP_GET, handleConnect);
+  server.on("/apconfig", HTTP_GET, handleAPConfig);
+  server.on("/sensor", HTTP_GET, handleSensor);
   
-  // ✅ Serve static files from LittleFS
-  server.on("/script.js", HTTP_GET, []() {
-    handleStaticFile("/script.js", "application/javascript");
-  });
-  server.on("/styles.css", HTTP_GET, []() {
-    handleStaticFile("/styles.css", "text/css");
-  });
+  server.on("/script.js", HTTP_GET, []() { handleStatic("/script.js", "application/javascript"); });
+  server.on("/styles.css", HTTP_GET, []() { handleStatic("/styles.css", "text/css"); });
   
-  // ✅ 404 handler
   server.onNotFound([]() {
-    server.send(404, "text/plain", "404 Not Found");
-    Serial.println("❌ 404: " + server.uri());
+    Serial.println("404: " + server.uri());
+    server.send(404, "text/plain", "Not Found");
   });
   
   server.begin();
-  Serial.println("✅ HTTP server started on port 80");
-  Serial.println("📡 Access Points:");
-  Serial.println("   AP Mode: http://192.168.4.1");
-  if (WiFi.getMode() == WIFI_STA && WiFi.isConnected()) {
-    Serial.println("   STA Mode: http://" + WiFi.localIP().toString());
-  }
+  Serial.println("✅ HTTP Server started on port 80");
+  Serial.println("🌐 Access: http://" + WiFi.softAPIP().toString());
   
-  // Main loop
+  // ==================== MAIN LOOP ====================
   for (;;) {
     server.handleClient();
-    
-    if (connecting) {
-      wl_status_t st = WiFi.status();
-      
-      if (st == WL_CONNECTED) {
-        Serial.println("\n✅ WiFi STA connected!");
-        Serial.print("IP: ");
-        Serial.println(WiFi.localIP());
-        
-        isWifiConnected = true;
-        connecting = false;
-        isAPMode = false;
-        
-        if (xBinarySemaphoreInternet != NULL) {
-          xSemaphoreGive(xBinarySemaphoreInternet);
-          Serial.println("✅ Semaphore given");
-        }
-      }
-      else if (millis() - connect_start_ms > 15000) {
-        Serial.println("\n❌ WiFi timeout! Back to AP mode");
-        
-        connecting = false;
-        isWifiConnected = false;
-        WiFi.disconnect(true);
-        startAP();
-      }
-    }
-    
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 }
