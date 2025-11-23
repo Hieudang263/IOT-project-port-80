@@ -2,16 +2,21 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <LittleFS.h>
+#include <Adafruit_NeoPixel.h>
 
 #include "global.h"
 #include "task_check_info.h"
 #include "mainserver.h"
 
 // ==================== LED CONFIG ====================
-#define LED1_PIN 48
-#define LED2_PIN 41
+#define LED1_PIN 48               // On-board RGB LED data pin (AtomS3 / Yolo Uno)
+#define LED2_PIN 41               // External LED pin (if wired). Change if needed.
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
+static const uint8_t LED1_CHANNEL = 0;
+static const uint8_t LED2_CHANNEL = 1;
+static const bool LED1_IS_NEOPIXEL = true;
+static Adafruit_NeoPixel led1Strip(1, LED1_PIN, NEO_GRB + NEO_KHZ800);
 
 struct LEDState {
   bool isOn;
@@ -45,47 +50,73 @@ String ap_password = "123456789";
 
 // ==================== PWM FUNCTIONS ====================
 void setupPWM() {
-  Serial.println("🔧 Setting up PWM...");
-  
-  // ✅ Use new ESP32 Arduino Core 3.x API
-  #if ESP_ARDUINO_VERSION_MAJOR >= 3
-    if (!ledcAttach(LED1_PIN, PWM_FREQ, PWM_RESOLUTION)) {
-      Serial.println("❌ Failed to attach LED1");
-    }
-    if (!ledcAttach(LED2_PIN, PWM_FREQ, PWM_RESOLUTION)) {
-      Serial.println("❌ Failed to attach LED2");
-    }
-  #else
-    // Old API for Arduino Core 2.x
-    ledcSetup(0, PWM_FREQ, PWM_RESOLUTION);
-    ledcSetup(1, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttachPin(LED1_PIN, 0);
-    ledcAttachPin(LED2_PIN, 1);
-  #endif
-  
-  // Start OFF
-  ledcWrite(LED1_PIN, 0);
-  ledcWrite(LED2_PIN, 0);
-  
-  Serial.println("✅ PWM initialized (LED1:GPIO48, LED2:GPIO41)");
+  Serial.println("[PWM] Setting up PWM...");
+
+  // LED1: built-in NeoPixel (AtomS3/Yolo Uno). Do NOT drive with PWM.
+  if (LED1_IS_NEOPIXEL) {
+    led1Strip.begin();
+    led1Strip.clear();
+    led1Strip.show();
+    Serial.println("[PWM] LED1 configured as NeoPixel on GPIO48");
+  } else {
+    ledcSetup(LED1_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttachPin(LED1_PIN, LED1_CHANNEL);
+    ledcWrite(LED1_CHANNEL, 0);
+  }
+
+  // LED2: regular PWM if you wire an LED to LED2_PIN
+  ledcSetup(LED2_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(LED2_PIN, LED2_CHANNEL);
+  ledcWrite(LED2_CHANNEL, 0);
+
+  Serial.println("[PWM] Initialized (LED1:GPIO48 NeoPixel, LED2:GPIO41 PWM)");
 }
 
 void setLED(int num, bool state, int brightness) {
   LEDState* led = (num == 1) ? &led1 : &led2;
-  uint8_t pin = (num == 1) ? LED1_PIN : LED2_PIN;
-  
+  uint8_t channel = (num == 1) ? LED1_CHANNEL : LED2_CHANNEL;
+
   led->isOn = state;
   led->brightness = constrain(brightness, 0, 100);
-  
+
   if (state && brightness > 0) {
     led->pwmValue = map(led->brightness, 0, 100, 0, 255);
-    ledcWrite(pin, led->pwmValue);
-    Serial.printf("💡 LED%d: ON @ %d%% (PWM:%d)\n", num, led->brightness, led->pwmValue);
+    if (num == 1 && LED1_IS_NEOPIXEL) {
+      led1Strip.setBrightness(led->pwmValue);
+      uint32_t color = led1Strip.Color(255, 255, 255);
+      led1Strip.fill(color, 0, 1);
+      led1Strip.show();
+    } else {
+      ledcWrite(channel, led->pwmValue);
+    }
+    Serial.printf("[LED] LED%d: ON @ %d%% (PWM:%d)\n", num, led->brightness, led->pwmValue);
   } else {
     led->pwmValue = 0;
-    ledcWrite(pin, 0);
-    Serial.printf("💡 LED%d: OFF\n", num);
+    if (num == 1 && LED1_IS_NEOPIXEL) {
+      led1Strip.clear();
+      led1Strip.show();
+    } else {
+      ledcWrite(channel, 0);
+    }
+    Serial.printf("[LED] LED%d: OFF\n", num);
   }
+}
+
+// Shared LED control helper (used by both port 80 & 8080)
+String processLedControl(int device, const String &state, int brightness, int &httpCode) {
+  if (device < 1 || device > 2) {
+    httpCode = 400;
+    return "{\"ok\":false,\"message\":\"Invalid device\"}";
+  }
+
+  bool isOn = (state == "ON" || state == "on");
+  int clampedBrightness = constrain(brightness, 0, 100);
+  setLED(device, isOn, clampedBrightness);
+
+  httpCode = 200;
+  return "{\"ok\":true,\"led\":" + String(device) +
+         ",\"state\":\"" + (isOn ? "ON" : "OFF") +
+         "\",\"brightness\":" + String(clampedBrightness) + "}";
 }
 
 // ==================== HTML PAGE ====================
@@ -115,18 +146,9 @@ void handleControl() {
   Serial.println("\n======== LED CONTROL ========");
   Serial.printf("Device:%d State:%s Bright:%d%%\n", device, state.c_str(), brightness);
   
-  if (device < 1 || device > 2) {
-    server.send(400, "text/plain", "Invalid device");
-    return;
-  }
-  
-  bool isOn = (state == "ON" || state == "on");
-  setLED(device, isOn, brightness);
-  
-  String json = "{\"ok\":true,\"led\":" + String(device) + 
-                ",\"state\":\"" + (isOn?"ON":"OFF") + 
-                "\",\"brightness\":" + String(brightness) + "}";
-  server.send(200, "application/json", json);
+  int httpCode = 200;
+  String json = processLedControl(device, state, brightness, httpCode);
+  server.send(httpCode, httpCode == 200 ? "application/json" : "text/plain", json);
   Serial.println("=============================\n");
 }
 

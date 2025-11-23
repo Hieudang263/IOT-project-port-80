@@ -1,5 +1,5 @@
 // ==================== WEBSOCKET ====================
-var gateway = `ws://${window.location.hostname}/ws`;
+var gateway = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 var websocket;
 
 window.addEventListener('load', function() {

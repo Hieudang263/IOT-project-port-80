@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include "config_coreiot.h"
 #include "coreiot.h"
+#include "mainserver.h"
 
 static AsyncWebServer dashboardServer(8080);
 static AsyncWebSocket ws("/ws");
@@ -106,6 +107,17 @@ void connnectWSV() {
     });
     dashboardServer.on("/styles.css", HTTP_GET, [](AsyncWebServerRequest *req){
         req->send(LittleFS, "/styles.css", "text/css");
+    });
+
+    // LED control via HTTP (same API as port 80)
+    dashboardServer.on("/control", HTTP_GET, [](AsyncWebServerRequest *req){
+        int device = req->hasParam("device") ? req->getParam("device")->value().toInt() : 0;
+        String state = req->hasParam("state") ? req->getParam("state")->value() : "";
+        int brightness = req->hasParam("brightness") ? req->getParam("brightness")->value().toInt() : 0;
+
+        int httpCode = 200;
+        String body = processLedControl(device, state, brightness, httpCode);
+        req->send(httpCode, httpCode == 200 ? "application/json" : "text/plain", body);
     });
     dashboardServer.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *req){
         req->send(204);

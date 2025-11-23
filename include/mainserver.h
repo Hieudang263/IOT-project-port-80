@@ -2,13 +2,7 @@
 #define MAINSERVER_H
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
 #include "global.h"
-
-#define LED1_PIN 48
-#define LED2_PIN 41
-#define BOOT_PIN 0
 
 extern bool isAPMode;
 
@@ -20,6 +14,10 @@ void startAP();
 
 void setupServer();
 void connectToWiFi();
+
+// Shared LED control helper so both port 80 and port 8080 can reuse it
+String processLedControl(int device, const String &state, int brightness, int &httpCode);
+void setLED(int num, bool state, int brightness);
 
 void main_server_task(void *pvParameters);
 
